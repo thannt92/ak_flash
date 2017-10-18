@@ -1,5 +1,5 @@
 TOOL_DIR =
-MODULE	 = host_uart_boot
+MODULE	 = ak_flash
 OPTIMIZE = -g -Os
 CXX	 = g++
 CC	 = gcc
