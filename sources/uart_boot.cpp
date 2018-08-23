@@ -36,7 +36,7 @@ using namespace std;
 #define TIMER_ADD_SIG			0x01
 static timer_t timer_id_1ms;
 
-#define PBSTR		"||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+#define PBSTR		"############################################################"
 #define PBWIDTH		60
 
 typedef struct {
@@ -84,10 +84,12 @@ static void uart_boot_clear_to();
 #define UART_BOOT_CMD_TRANSFER_FW_REQ_SIG_TO		0x04
 #define UART_BOOT_CMD_CHECKSUM_FW_REQ_SIG_TO		0x05
 
-#define UART_BOOT_CMD_HANDSHAKE_REQ_SIG_INTERVAL	300
+#define UART_BOOT_CMD_HANDSHAKE_REQ_SIG_INTERVAL	1000
 #define UART_BOOT_CMD_UPDATE_REQ_SIG_INTERVAL		500
 #define UART_BOOT_CMD_TRANSFER_FW_REQ_SIG_INTERVAL	500
 #define UART_BOOT_CMD_CHECKSUM_FW_REQ_SIG_INTERVAL	1000
+
+#define HANDSHAKE_REQ_RETRY_COUNTER_MAX				10 /* 10*1000 ms ~ 10s */
 
 void uart_boot_cmd_handshake_req(void*);
 void uart_boot_cmd_handshake_res(void*);
@@ -109,6 +111,7 @@ void print_progress (double percentage, transfer_fw_status_t* fw_stt) {
 }
 
 static transfer_fw_status_t transfer_fw_status;
+static uint32_t handshake_req_retry_counter;
 
 int main(int argc, char *argv[]) {
 #if 0
@@ -196,6 +199,8 @@ void timer_handler(int sig, siginfo_t *si, void *uc) {
 	(void)si;
 	(void)uc;
 
+	uint8_t clear_to_flag = 1;
+
 	pthread_mutex_lock(&uart_boot_to.mt);
 
 	if (uart_boot_to.enable) {
@@ -203,9 +208,20 @@ void timer_handler(int sig, siginfo_t *si, void *uc) {
 			switch (uart_boot_to.cmd) {
 
 			case UART_BOOT_CMD_HANDSHAKE_REQ_SIG_TO: {
-				cout << "[ERR] " << "handshake faulted !" << endl;
-				cout << "[ERR] " << "Please check boot condition !" << endl;
-				exit(-1);
+				if (handshake_req_retry_counter++ < HANDSHAKE_REQ_RETRY_COUNTER_MAX) {
+					clear_to_flag = 0;
+
+					pthread_mutex_unlock(&uart_boot_to.mt);
+					uart_boot_cmd_handshake_req(NULL);
+					pthread_mutex_lock(&uart_boot_to.mt);
+
+					cout << "\r[WRN] " << "handshake retry times " << std::dec << handshake_req_retry_counter << "!" << endl;
+				}
+				else {
+					cout << "[ERR] " << "handshake faulted !" << endl;
+					cout << "[ERR] " << "Please check boot condition !" << endl;
+					exit(-1);
+				}
 			}
 				break;
 
@@ -232,9 +248,11 @@ void timer_handler(int sig, siginfo_t *si, void *uc) {
 			}
 
 			/* clear timeout */
-			uart_boot_to.enable = 0;
-			uart_boot_to.cmd = 0;
-			uart_boot_to.counter = 0;
+			if (clear_to_flag) {
+				uart_boot_to.enable = 0;
+				uart_boot_to.cmd = 0;
+				uart_boot_to.counter = 0;
+			}
 		}
 	}
 
