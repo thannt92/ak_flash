@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <iostream>
 #include <vector>
+#include <algorithm>
+#include <sstream>
 
 #include <pthread.h>
 #include <unistd.h>
@@ -283,10 +285,149 @@ void uart_boot_init(pf_uart_boot_cmd_handler boot_entry_handler) {
 	uart_boot_frame.uart_boot_cmd_handler = boot_entry_handler;
 }
 
-int uart_boot_dev_opentty(const char* devpath) {
-	struct termios options;
+void extract_complete_lines(std::string &buf, std::vector<std::string> &lines) {
+	std::string::size_type pos;
+	while ((pos = buf.find ('\n')) != std::string::npos) {
+		lines.push_back (buf.substr (0, pos));
+		buf.erase (0, pos + 1);
+	}
+}
 
-	uart_boot_dev_fd = open(devpath, O_RDWR | O_NOCTTY | O_NDELAY);
+int uart_boot_dev_opentty(const char* devpath) {
+	char readbuf[256];
+	FILE *st_sys_ret_fp;
+	struct termios options;
+	string st_realdevpath;
+	string st_devconflict;
+	string command;
+
+	/* Check conflick device */
+	command.assign("readlink -f ");
+	command.append(devpath);
+	st_sys_ret_fp = popen(command.c_str(), "r");
+
+	st_realdevpath.assign("");
+
+	if (st_sys_ret_fp != NULL) {
+		do {
+			memset(readbuf, 255, 0);
+			fgets(readbuf, 254, st_sys_ret_fp);
+			if(feof(st_sys_ret_fp)) break;
+
+			st_realdevpath.append(string((const char*)readbuf));
+			st_realdevpath.erase(std::remove(st_realdevpath.begin(), st_realdevpath.end(), '\n'), st_realdevpath.end());
+		} while(!feof(st_sys_ret_fp));
+
+		pclose(st_sys_ret_fp);
+	}
+	else {
+		cout << "[ERR] " << "popen( " << "readlink -f " << devpath << " )" << endl;
+		exit(1);
+	}
+
+	st_devconflict.assign("");
+
+	if (st_realdevpath.compare(devpath) == 0) { /* using real device name */
+		command.assign("ps -ef | grep  ");
+		command.append(st_realdevpath);
+		st_sys_ret_fp = popen(command.c_str(), "r");
+
+		if (st_sys_ret_fp != NULL) {
+			do {
+				memset(readbuf, 255, 0);
+				fgets(readbuf, 254, st_sys_ret_fp);
+				if(feof(st_sys_ret_fp)) break;
+
+				st_devconflict.append(string((const char*)readbuf));
+			} while(!feof(st_sys_ret_fp));
+
+			pclose(st_sys_ret_fp);
+		}
+		else {
+			cout << "[ERR] " << "popen( " << "readlink -f " << st_realdevpath << " )" << endl;
+			exit(1);
+		}
+
+		std::vector<std::string> vector_ret_lines;
+		extract_complete_lines(st_devconflict, vector_ret_lines);
+
+		if (vector_ret_lines.size() > 3) {
+			cout << "\n[ERR] " << "Device is busy now, Please check !\n" << endl;
+			for (auto line : vector_ret_lines) {
+				std::cout << line << '\n';
+			}
+			cout << "\n[HELP] " << "Using command fuser -k " << st_realdevpath << endl << endl;
+			exit(1);
+		}
+	}
+	else { /* using alias device name */
+		command.assign("ps -ef | grep  ");
+		command.append(devpath);
+		st_sys_ret_fp = popen(command.c_str(), "r");
+
+		if (st_sys_ret_fp != NULL) {
+			do {
+				memset(readbuf, 255, 0);
+				fgets(readbuf, 254, st_sys_ret_fp);
+				if(feof(st_sys_ret_fp)) break;
+
+				st_devconflict.append(string((const char*)readbuf));
+			} while(!feof(st_sys_ret_fp));
+
+			pclose(st_sys_ret_fp);
+		}
+		else {
+			cout << "[ERR] " << "popen( " << "readlink -f " << devpath << " )" << endl;
+			exit(1);
+		}
+
+		std::vector<std::string> vector_ret_lines;
+		extract_complete_lines(st_devconflict, vector_ret_lines);
+
+		if (vector_ret_lines.size() > 3) {
+			cout << "\n[ERR] " << "Device is busy now, Please check !\n" << endl;
+			for (auto line : vector_ret_lines) {
+				std::cout << line << '\n';
+			}
+			cout << "\n[HELP] " << "Using command fuser -k " << devpath << endl << endl;
+			exit(1);
+		}
+
+		command.assign("ps -ef | grep  ");
+		command.append(st_realdevpath);
+		st_sys_ret_fp = popen(command.c_str(), "r");
+		st_devconflict.assign("");
+
+		if (st_sys_ret_fp != NULL) {
+			do {
+				memset(readbuf, 255, 0);
+				fgets(readbuf, 254, st_sys_ret_fp);
+				if(feof(st_sys_ret_fp)) break;
+
+				st_devconflict.append(string((const char*)readbuf));
+			} while(!feof(st_sys_ret_fp));
+
+			pclose(st_sys_ret_fp);
+		}
+		else {
+			cout << "[ERR] " << "popen( " << "readlink -f " << st_realdevpath << " )" << endl;
+			exit(1);
+		}
+
+		vector_ret_lines.clear();
+		extract_complete_lines(st_devconflict, vector_ret_lines);
+
+		if (vector_ret_lines.size() > 2) {
+			cout << "\n[ERR] " << "Device is busy now, Please check !\n" << endl;
+			for (auto line : vector_ret_lines) {
+				std::cout << line << '\n';
+			}
+			cout << "\n[HELP] " << "Using command fuser -k " << st_realdevpath << endl << endl;
+			exit(1);
+		}
+	}
+
+	uart_boot_dev_fd = open(st_realdevpath.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
 
 	if (uart_boot_dev_fd < 0) {
 		return uart_boot_dev_fd;
